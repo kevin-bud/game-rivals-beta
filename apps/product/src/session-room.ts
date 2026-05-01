@@ -1,9 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 
 import {
+  applyMove,
   buildLighthouseView,
   buildPilotView,
   generateGameState,
+  parseDirection,
+  randomSeed,
   type GameState,
   type LighthouseView,
   type PilotView,
@@ -28,13 +31,16 @@ const gameRoleFor = (role: Role): GameRole => {
   return "lighthouse";
 };
 
+type Outcome = "win" | "loss";
+
 type ServerMessage =
   | { type: "welcome"; you: Role; peers: Role[] }
   | { type: "peer-joined"; role: Role; peers: Role[] }
   | { type: "peer-left"; role: Role; peers: Role[] }
   | { type: "full" }
   | { type: "game-state"; view: "pilot"; state: PilotView }
-  | { type: "game-state"; view: "lighthouse"; state: LighthouseView };
+  | { type: "game-state"; view: "lighthouse"; state: LighthouseView }
+  | { type: "ended"; outcome: Outcome };
 
 type AttachmentState = {
   role: Role;
@@ -58,6 +64,44 @@ const isAttachment = (value: unknown): value is AttachmentState => {
   return true;
 };
 
+type ClientMessage =
+  | { type: "input"; action: "move"; direction: string }
+  | { type: "restart" };
+
+const parseClientMessage = (raw: string): ClientMessage | null => {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof payload !== "object" || payload === null) {
+    return null;
+  }
+  const candidate = payload as { type?: unknown };
+  if (candidate.type === "restart") {
+    return { type: "restart" };
+  }
+  if (candidate.type === "input") {
+    const inputCandidate = payload as {
+      action?: unknown;
+      direction?: unknown;
+    };
+    if (
+      inputCandidate.action === "move" &&
+      typeof inputCandidate.direction === "string"
+    ) {
+      return {
+        type: "input",
+        action: "move",
+        direction: inputCandidate.direction,
+      };
+    }
+    return null;
+  }
+  return null;
+};
+
 export class SessionRoom extends DurableObject {
   // In-memory only. The DO can hibernate; on wake we regenerate the state
   // from the session code, which is captured per-socket attachment. A fresh
@@ -72,25 +116,49 @@ export class SessionRoom extends DurableObject {
     return this.gameState;
   }
 
-  private sendGameStateTo(socket: WebSocket, role: Role, code: string): void {
-    const state = this.ensureGameState(code);
+  private buildGameStateMessage(role: Role, state: GameState): ServerMessage {
     const gameRole = gameRoleFor(role);
-    const message: ServerMessage =
-      gameRole === "pilot"
-        ? {
-            type: "game-state",
-            view: "pilot",
-            state: buildPilotView(state),
-          }
-        : {
-            type: "game-state",
-            view: "lighthouse",
-            state: buildLighthouseView(state),
-          };
+    if (gameRole === "pilot") {
+      return {
+        type: "game-state",
+        view: "pilot",
+        state: buildPilotView(state),
+      };
+    }
+    return {
+      type: "game-state",
+      view: "lighthouse",
+      state: buildLighthouseView(state),
+    };
+  }
+
+  private safeSend(socket: WebSocket, message: ServerMessage): void {
     try {
       socket.send(JSON.stringify(message));
     } catch {
       // Best effort — if the socket is gone, webSocketClose will tidy up.
+    }
+  }
+
+  private sendGameStateTo(socket: WebSocket, role: Role, code: string): void {
+    const state = this.ensureGameState(code);
+    this.safeSend(socket, this.buildGameStateMessage(role, state));
+  }
+
+  private broadcastGameState(state: GameState): void {
+    for (const socket of this.ctx.getWebSockets()) {
+      const attachment = socket.deserializeAttachment() as unknown;
+      if (!isAttachment(attachment)) {
+        continue;
+      }
+      this.safeSend(socket, this.buildGameStateMessage(attachment.role, state));
+    }
+  }
+
+  private broadcastEnded(outcome: Outcome): void {
+    const message: ServerMessage = { type: "ended", outcome };
+    for (const socket of this.ctx.getWebSockets()) {
+      this.safeSend(socket, message);
     }
   }
 
@@ -186,11 +254,51 @@ export class SessionRoom extends DurableObject {
   }
 
   override async webSocketMessage(
-    _ws: WebSocket,
-    _message: ArrayBuffer | string,
+    ws: WebSocket,
+    message: ArrayBuffer | string,
   ): Promise<void> {
-    // No client-originated game messages yet. The Pilot's movement and
-    // the Lighthouse's beam will arrive on this channel in later slices.
+    if (typeof message !== "string") {
+      return;
+    }
+    const parsed = parseClientMessage(message);
+    if (parsed === null) {
+      return;
+    }
+    const attachment = ws.deserializeAttachment() as unknown;
+    if (!isAttachment(attachment)) {
+      return;
+    }
+
+    if (parsed.type === "input") {
+      // Only the Pilot can drive the ship. Lighthouse inputs drop silently.
+      if (gameRoleFor(attachment.role) !== "pilot") {
+        return;
+      }
+      const direction = parseDirection(parsed.direction);
+      if (direction === null) {
+        return;
+      }
+      const state = this.ensureGameState(attachment.code);
+      const result = applyMove(state, direction);
+      if (result.kind === "noop") {
+        return;
+      }
+      this.gameState = result.state;
+      this.broadcastGameState(result.state);
+      if (result.kind === "won") {
+        this.broadcastEnded("win");
+      } else if (result.kind === "lost") {
+        this.broadcastEnded("loss");
+      }
+      return;
+    }
+
+    if (parsed.type === "restart") {
+      // Either client may restart. Use a fresh random seed so each round
+      // presents a different layout — Play again should not feel canned.
+      this.gameState = generateGameState(randomSeed());
+      this.broadcastGameState(this.gameState);
+    }
   }
 
   override async webSocketClose(
@@ -230,8 +338,8 @@ export class SessionRoom extends DurableObject {
       }
     }
     // Drop the cached grid so the next pairing in the same DO instance
-    // gets a fresh roll. The seed is deterministic per code, so the same
-    // pair re-joining the same code still gets the same grid.
+    // gets a fresh roll. The seed is deterministic per code on first round,
+    // and random thereafter.
     if (remaining.length === 0) {
       this.gameState = null;
     }
