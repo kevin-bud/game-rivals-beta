@@ -11,7 +11,7 @@ asymmetry: two devices on the same session see *different* views of the
 
 **Assigned:** 2026-05-01 13:25 — Engineer
 
-**Status:** in-progress
+**Status:** awaiting-review
 
 **Game context (read once before coding):**
 
