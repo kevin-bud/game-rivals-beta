@@ -1,16 +1,31 @@
 # Product app
 
-This is the product. The Engineer replaces `src/index.ts` with whatever
-the team decides to build.
+## What is currently playable
+
+Two devices can connect to a shared session. Open the deployed URL on
+the first device to start a new session — you will be shown a 5-character
+join code and a shareable link of the form `<base>/?s=<code>`. Send that
+link to the second player. When the second device opens it, both devices
+update within a couple of seconds: one is assigned the role **A**, the
+other **B**, and both see each other as connected in a phone-friendly
+lobby. A third device hitting the same code is rejected with a clear
+"session is full" message.
+
+There is no game mechanic yet. This is the session spine; the game is
+built on top of it.
+
+Deployed URL: <https://game-rivals-beta-product.kevin-wilson.workers.dev>
 
 ## Stack
 
-The starting point is a single Cloudflare Worker — `src/index.ts`. There
-is deliberately no framework, no database, no UI library. Those are
-decisions the agent team makes based on the brief.
-
-When you adopt a framework, update this README and `apps/product/package.json`
-to reflect the new toolchain.
+- Single Cloudflare Worker (`src/index.ts`) serves the HTML client and
+  exposes `/api/new` and `/api/ws`.
+- One Durable Object class — `SessionRoom` — holds the live state for
+  each session, identified by `idFromName(code)`.
+- WebSocket connections use the Cloudflare Hibernation API so a room
+  can sleep between events without dropping its peers.
+- The client is a single inline-scripted HTML page. No framework, no
+  build step.
 
 ## Scripts
 
@@ -22,18 +37,17 @@ to reflect the new toolchain.
 
 ## Tests
 
-`tests/smoke.spec.ts` is a single Playwright test that hits the deployed
-URL and asserts a 200 response and the page body contains the expected
-content. The Reviewer agent extends this — every shipped feature should
-get a Playwright test. Tests run against `PRODUCT_URL` if set, otherwise
-against `http://localhost:8788` for local dev.
+`tests/smoke.spec.ts` runs two scenarios: a home-page render check and a
+two-browser-context flow that creates a session in one context, joins it
+from a second context, asserts both see each other with distinct roles,
+and confirms a third context is rejected with "session is full". The
+phone viewport (390x844) is used to catch horizontal-scroll regressions.
 
-Keep the tests passing. The Reviewer gates "shipped" claims on green
-tests against the deployed URL.
+Tests run against `PRODUCT_URL` if set, otherwise against
+`http://localhost:8788` for local dev.
 
-## Adding Cloudflare resources
+## Cloudflare resources
 
-If the brief calls for KV, D1, R2 or Durable Objects, add the binding
-to `wrangler.jsonc`, then provision the resource via the Cloudflare
-Developer Platform MCP (or `wrangler` CLI). Record the decision in
-`coordination/decision-log.md`.
+- Durable Object class `SessionRoom`, bound as `SESSION` in
+  `wrangler.jsonc` (SQLite-backed migration `v1`). Provisioned
+  automatically by `wrangler deploy`.
