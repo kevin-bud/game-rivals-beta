@@ -1,5 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 
+import {
+  buildLighthouseView,
+  buildPilotView,
+  generateGameState,
+  type GameState,
+  type LighthouseView,
+  type PilotView,
+} from "./game.js";
+
 // A SessionRoom holds the live state for a single two-player session.
 // Each room is addressed by its short code via `env.SESSION.idFromName(code)`.
 // Connections use the WebSocket Hibernation API so the DO can sleep between
@@ -7,25 +16,84 @@ import { DurableObject } from "cloudflare:workers";
 
 export type Role = "A" | "B";
 
+// Role-to-game-role mapping is fixed for Beacon: A is the Pilot (fog-of-war
+// porthole), B is the Lighthouse (god view). This intentionally piggy-backs
+// on the existing A/B assignment from the spine — no separate role pick.
+export type GameRole = "pilot" | "lighthouse";
+
+const gameRoleFor = (role: Role): GameRole => {
+  if (role === "A") {
+    return "pilot";
+  }
+  return "lighthouse";
+};
+
 type ServerMessage =
   | { type: "welcome"; you: Role; peers: Role[] }
   | { type: "peer-joined"; role: Role; peers: Role[] }
   | { type: "peer-left"; role: Role; peers: Role[] }
-  | { type: "full" };
+  | { type: "full" }
+  | { type: "game-state"; view: "pilot"; state: PilotView }
+  | { type: "game-state"; view: "lighthouse"; state: LighthouseView };
 
 type AttachmentState = {
   role: Role;
+  // Session code is captured at connect time so we can deterministically
+  // seed the grid when the second player arrives. The DO does not otherwise
+  // know its own name.
+  code: string;
 };
 
 const isAttachment = (value: unknown): value is AttachmentState => {
   if (typeof value !== "object" || value === null) {
     return false;
   }
-  const candidate = value as { role?: unknown };
-  return candidate.role === "A" || candidate.role === "B";
+  const candidate = value as { role?: unknown; code?: unknown };
+  if (candidate.role !== "A" && candidate.role !== "B") {
+    return false;
+  }
+  if (typeof candidate.code !== "string") {
+    return false;
+  }
+  return true;
 };
 
 export class SessionRoom extends DurableObject {
+  // In-memory only. The DO can hibernate; on wake we regenerate the state
+  // from the session code, which is captured per-socket attachment. A fresh
+  // grid on hibernate-and-resume is fine for this slice — both players are
+  // expected to play through without idle gaps long enough to evict.
+  private gameState: GameState | null = null;
+
+  private ensureGameState(code: string): GameState {
+    if (this.gameState === null) {
+      this.gameState = generateGameState(code);
+    }
+    return this.gameState;
+  }
+
+  private sendGameStateTo(socket: WebSocket, role: Role, code: string): void {
+    const state = this.ensureGameState(code);
+    const gameRole = gameRoleFor(role);
+    const message: ServerMessage =
+      gameRole === "pilot"
+        ? {
+            type: "game-state",
+            view: "pilot",
+            state: buildPilotView(state),
+          }
+        : {
+            type: "game-state",
+            view: "lighthouse",
+            state: buildLighthouseView(state),
+          };
+    try {
+      socket.send(JSON.stringify(message));
+    } catch {
+      // Best effort — if the socket is gone, webSocketClose will tidy up.
+    }
+  }
+
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname !== "/ws") {
@@ -33,6 +101,11 @@ export class SessionRoom extends DurableObject {
     }
     if (request.headers.get("upgrade") !== "websocket") {
       return new Response("expected websocket", { status: 426 });
+    }
+
+    const code = url.searchParams.get("s");
+    if (code === null || code.length === 0) {
+      return new Response("missing session code", { status: 400 });
     }
 
     const sockets = this.ctx.getWebSockets();
@@ -63,7 +136,7 @@ export class SessionRoom extends DurableObject {
     const [clientSide, serverSide] = Object.values(pair);
 
     this.ctx.acceptWebSocket(serverSide);
-    const attachment: AttachmentState = { role };
+    const attachment: AttachmentState = { role, code };
     serverSide.serializeAttachment(attachment);
 
     // Tell the new peer who they are.
@@ -92,6 +165,23 @@ export class SessionRoom extends DurableObject {
       }
     }
 
+    // When the second player joins, generate the grid (if not already) and
+    // broadcast a role-tailored game-state to each connected socket. The
+    // Pilot only ever sees their fog porthole; the Lighthouse only ever
+    // sees the full board. The asymmetry is enforced at the wire boundary.
+    if (peersAfter.length === 2) {
+      this.gameState = generateGameState(code);
+      // Send to the new socket first, then any pre-existing sockets.
+      this.sendGameStateTo(serverSide, role, code);
+      for (const other of sockets) {
+        const otherAttachment = other.deserializeAttachment() as unknown;
+        if (!isAttachment(otherAttachment)) {
+          continue;
+        }
+        this.sendGameStateTo(other, otherAttachment.role, otherAttachment.code);
+      }
+    }
+
     return new Response(null, { status: 101, webSocket: clientSide });
   }
 
@@ -99,9 +189,8 @@ export class SessionRoom extends DurableObject {
     _ws: WebSocket,
     _message: ArrayBuffer | string,
   ): Promise<void> {
-    // No game messages yet. The session spine just keeps both peers connected
-    // and aware of each other. Future iterations will route gameplay events
-    // through here.
+    // No client-originated game messages yet. The Pilot's movement and
+    // the Lighthouse's beam will arrive on this channel in later slices.
   }
 
   override async webSocketClose(
@@ -139,6 +228,12 @@ export class SessionRoom extends DurableObject {
       } catch {
         // Best effort — peer may already be gone.
       }
+    }
+    // Drop the cached grid so the next pairing in the same DO instance
+    // gets a fresh roll. The seed is deterministic per code, so the same
+    // pair re-joining the same code still gets the same grid.
+    if (remaining.length === 0) {
+      this.gameState = null;
     }
   }
 
