@@ -1,7 +1,6 @@
-// Beacon — first slice. Authoritative game state lives in `SessionRoom`;
-// this module supplies the types and the generator. No movement, no beam,
-// no win condition yet — only the shared grid that each role sees through
-// a different lens.
+// Beacon — authoritative game state lives in `SessionRoom`; this module
+// supplies the types, the generator, and the move resolver. The DO calls
+// these pure functions; nothing here knows about sockets or sessions.
 
 export type CellType = "empty" | "rock" | "port" | "ship";
 
@@ -10,12 +9,39 @@ export type Position = {
   readonly y: number;
 };
 
+export type GameStatus = "playing" | "won" | "lost";
+
+export type Direction = "up" | "down" | "left" | "right";
+
 export type GameState = {
   readonly width: number;
   readonly height: number;
   readonly ship: Position;
   readonly port: Position;
   readonly rocks: ReadonlyArray<Position>;
+  readonly status: GameStatus;
+};
+
+export type MoveResult =
+  | { readonly kind: "noop"; readonly state: GameState }
+  | { readonly kind: "moved"; readonly state: GameState }
+  | { readonly kind: "won"; readonly state: GameState }
+  | { readonly kind: "lost"; readonly state: GameState };
+
+const isValidDirection = (value: string): value is Direction => {
+  return (
+    value === "up" || value === "down" || value === "left" || value === "right"
+  );
+};
+
+export const parseDirection = (value: unknown): Direction | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  if (!isValidDirection(value)) {
+    return null;
+  }
+  return value;
 };
 
 // Cells visible to the Pilot are masked to those within Chebyshev distance
@@ -75,8 +101,18 @@ const pickPosition = (
   throw new Error("could not place position on grid");
 };
 
-export const generateGameState = (sessionCode: string): GameState => {
-  const rng = mulberry32(seedFromCode(sessionCode));
+// Non-deterministic seed source. The first round per session uses the
+// session code as a seed (so manual reproduction is possible during review);
+// subsequent rounds (Play again) use a fresh random seed so each round
+// presents a different layout.
+export const randomSeed = (): number => {
+  return Math.floor(Math.random() * 0xffffffff) >>> 0;
+};
+
+export const generateGameState = (seed: number | string): GameState => {
+  const numericSeed =
+    typeof seed === "number" ? seed >>> 0 : seedFromCode(seed);
+  const rng = mulberry32(numericSeed);
   const taken = new Set<string>();
 
   // Place the ship near the bottom (Pilot starts at home) and the port near
@@ -123,7 +159,68 @@ export const generateGameState = (sessionCode: string): GameState => {
     ship,
     port,
     rocks,
+    status: "playing",
   };
+};
+
+const offsetFor = (direction: Direction): Position => {
+  if (direction === "up") {
+    return { x: 0, y: -1 };
+  }
+  if (direction === "down") {
+    return { x: 0, y: 1 };
+  }
+  if (direction === "left") {
+    return { x: -1, y: 0 };
+  }
+  return { x: 1, y: 0 };
+};
+
+// Applies a Pilot move to the authoritative state. Off-grid moves are
+// silent no-ops. A move onto the port wins; a move onto a rock loses; any
+// move when the game is already over is a no-op.
+export const applyMove = (
+  state: GameState,
+  direction: Direction,
+): MoveResult => {
+  if (state.status !== "playing") {
+    return { kind: "noop", state };
+  }
+  const offset = offsetFor(direction);
+  const target: Position = {
+    x: state.ship.x + offset.x,
+    y: state.ship.y + offset.y,
+  };
+  if (
+    target.x < 0 ||
+    target.x >= state.width ||
+    target.y < 0 ||
+    target.y >= state.height
+  ) {
+    return { kind: "noop", state };
+  }
+  const rockSet = new Set(state.rocks.map(positionKey));
+  if (rockSet.has(positionKey(target))) {
+    const next: GameState = {
+      ...state,
+      ship: target,
+      status: "lost",
+    };
+    return { kind: "lost", state: next };
+  }
+  if (state.port.x === target.x && state.port.y === target.y) {
+    const next: GameState = {
+      ...state,
+      ship: target,
+      status: "won",
+    };
+    return { kind: "won", state: next };
+  }
+  const next: GameState = {
+    ...state,
+    ship: target,
+  };
+  return { kind: "moved", state: next };
 };
 
 const isWithinFog = (cell: Position, ship: Position): boolean => {
@@ -147,6 +244,7 @@ export type PilotView = {
   readonly fogRadius: number;
   readonly ship: Position;
   readonly visible: ReadonlyArray<PilotCell>;
+  readonly status: GameStatus;
 };
 
 export const buildPilotView = (state: GameState): PilotView => {
@@ -177,6 +275,7 @@ export const buildPilotView = (state: GameState): PilotView => {
     fogRadius: FOG_RADIUS,
     ship: state.ship,
     visible,
+    status: state.status,
   };
 };
 
@@ -191,6 +290,7 @@ export type LighthouseView = {
   readonly width: number;
   readonly height: number;
   readonly cells: ReadonlyArray<LighthouseCell>;
+  readonly status: GameStatus;
 };
 
 export const buildLighthouseView = (state: GameState): LighthouseView => {
@@ -213,5 +313,6 @@ export const buildLighthouseView = (state: GameState): LighthouseView => {
     width: state.width,
     height: state.height,
     cells,
+    status: state.status,
   };
 };
