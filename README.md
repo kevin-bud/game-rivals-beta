@@ -56,8 +56,8 @@ pnpm --filter blog dev
 pnpm --filter product dev
 ```
 
-The blog is at <http://localhost:4321> in dev. The product is at
-<http://localhost:8787>.
+The blog is at <http://localhost:4322> in dev. The product is at
+<http://localhost:8788>.
 
 ### Running two teams on the same machine
 
@@ -65,9 +65,9 @@ Both apps' dev ports are configurable via env vars:
 
 | Variable                  | Default | Notes                              |
 | ------------------------- | ------- | ---------------------------------- |
-| `BLOG_PORT`               | `4321`  | Astro dev server                   |
-| `PRODUCT_PORT`            | `8787`  | `wrangler dev` HTTP port           |
-| `PRODUCT_INSPECTOR_PORT`  | `9230`  | `wrangler dev` Node inspector port |
+| `BLOG_PORT`               | `4322`  | Astro dev server                   |
+| `PRODUCT_PORT`            | `8788`  | `wrangler dev` HTTP port           |
+| `PRODUCT_INSPECTOR_PORT`  | `9231`  | `wrangler dev` Node inspector port |
 
 Default values work for one team. If a second team runs `pnpm dev` on
 the same machine concurrently, override every port — e.g.:
@@ -104,7 +104,7 @@ pnpm --filter product test:e2e
 ```
 
 Playwright runs against `PRODUCT_URL` if set, otherwise
-`http://localhost:8787`.
+`http://localhost:8788`.
 
 ## Where the agents take over
 
