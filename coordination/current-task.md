@@ -3,67 +3,90 @@
 Set by the Orchestrator. Read by the Engineer. The Engineer updates the
 `Status` field as work progresses.
 
-**Task:** Stand up the real-time session spine. Two devices can land on the
-deployed product URL, create/join a single shared session via a short code
-(or shareable link with the code in the URL), and both see each other
-connected in a phone-friendly lobby with distinct roles (A and B) assigned.
-No game mechanic yet — just the connection and role assignment.
+**Task:** Generate a per-session game grid in the Durable Object and
+render the two role-specific views ("Beacon" — Pilot vs Lighthouse). No
+movement, no beam, no win condition yet — this slice proves the
+asymmetry: two devices on the same session see *different* views of the
+*same* authoritative state.
 
-**Assigned:** 2026-05-01 12:00 — Engineer
+**Assigned:** 2026-05-01 13:25 — Engineer
 
-**Status:** awaiting-review
+**Status:** in-progress
+
+**Game context (read once before coding):**
+
+The chosen game is "Beacon" — see decision log entry "Game concept:
+'Beacon'" dated 2026-05-01 13:25 for the full design. Short version:
+cooperative two-player game on a small grid. Pilot (role A) navigates a
+craft through fog of war toward a port without hitting rocks.
+Lighthouse (role B) sees the whole grid and (later) rotates a beam to
+guide the Pilot. This task is *only* the first slice — the visible
+asymmetry, not the gameplay.
 
 **Definition of done:**
 
-- Visiting the deployed product URL on device 1 starts a new session and
-  shows a short join code (4–6 chars) plus a shareable link of the form
-  `<base>/?s=<code>` (or equivalent). Device 1 is held in the lobby
-  awaiting a partner.
-- Visiting `<base>/?s=<code>` on device 2 (different browser, different
-  network ideally) joins that same session.
-- Both devices reflect the second player connecting within ~2 seconds,
-  without a manual refresh.
-- Each device is told its role: one is "A", the other is "B". Roles are
-  stable for the lifetime of the session and visible on screen.
-- If a third device hits the same code, it is rejected with a clear
-  "session is full" message rather than silently joining.
-- The lobby renders correctly on a phone in portrait (iPhone-class
-  viewport, ~390px wide). No horizontal scroll.
-- Backed by a Cloudflare Durable Object holding the session, with
-  WebSocket connections from both clients (hibernation API is fine).
-  Persistence beyond DO memory is not required at this stage.
-- README at `apps/product/README.md` (or repo root if more appropriate)
-  is updated with a one-paragraph description of what is now playable
-  (currently: "two devices can connect to a shared session") and how to
-  open it.
+- When the second player joins (the spine already detects this), the
+  Durable Object generates a fresh game grid and broadcasts an
+  authoritative `game-state` message containing role-appropriate views
+  to each connected client.
+- The grid is a 2D array of cells. Suggested dimensions: 6 columns × 10
+  rows (phone-portrait friendly, comfortable tap targets). Cell types:
+  `empty`, `rock`, `port`, `ship`. Exactly one `port`, exactly one
+  `ship`, between 6 and 10 `rock` cells, the rest `empty`. Generation
+  is procedural (seeded from the session code or a fresh random — your
+  choice; record it in the commit message).
+- The Pilot's view shows only the cells within a fog-of-war radius
+  around the ship (suggested: cells at Chebyshev distance ≤ 1, i.e. the
+  ship and its 8 neighbours). All other cells render as fog. The Pilot
+  must be able to *see* their ship and the cells immediately around
+  it; rocks within view are visible; the port is only visible if it is
+  within view. The Pilot does not see anything outside the fog.
+- The Lighthouse's view shows the entire grid: ship position, all
+  rocks, the port. The Lighthouse does *not* see the Pilot's fog
+  radius — they see the full board.
+- Both views render correctly on a phone in portrait (~390px wide). No
+  horizontal scroll. The lobby layout still works for the two-players-
+  joined case as a fallback if anything goes wrong.
+- Role labels remain visible: the local player can still see whether
+  they are A/Pilot or B/Lighthouse.
+- The grid state is held in the DO. The two clients receive
+  *different* messages tailored to their role; do not send the full
+  state to the Pilot. (This matters — the asymmetry is real, not
+  cosmetic.)
+- A Playwright spec extends the existing test to assert: after both
+  players connect, the Pilot's page shows fog cells AND a ship cell
+  AND no full-grid markup; the Lighthouse's page shows all rock cells
+  AND the port AND the ship. Pick stable selectors (e.g. `data-cell`,
+  `data-cell-type`, `data-fog`) so the assertions are direct.
 - `pnpm --filter product deploy` succeeds and the deployed URL behaves
   as above. Local-only success is not "done".
 
 **Out of scope for this task:**
 
-- The game itself — no rounds, scores, inputs, or win conditions.
-- Reconnection on dropped sockets, refresh resilience, or session
-  resumption. A blunt "you have been disconnected, start a new session"
-  is acceptable for now.
-- Matchmaking with strangers. The MVP path is "share the link".
-- Visual polish beyond "this looks intentional on a phone".
+- Movement (Pilot taps to move). That is the *next* slice.
+- The beam (Lighthouse rotates a direction). Slice after movement.
+- Win/loss/timeout, restart, "play again". Later.
+- Visual polish beyond legible cells (a dark theme is welcome but not
+  required). Naming the game "Beacon" in the UI is optional this
+  slice; "session" wording is fine until the gameplay is in place.
 
 **Notes:**
 
-- Stack note from Orchestrator: Cloudflare Durable Object + WebSockets is
-  the expected approach. If after a serious look you believe a different
-  primitive is materially better (e.g., a single Worker + KV polling),
-  flag it back before implementing — do not silently switch. Otherwise
-  proceed and record the DO commitment in the decision log when you
-  start.
-- Keep the client tiny. Plain TypeScript + a single HTML page served
-  from the Worker is the default; no framework unless you have a reason
-  you can write down.
-- Hard rules apply: curly braces on every conditional, no `any`, prefer
-  `type` over `interface`, named exports, British English in any
-  human-facing copy. Commit small and often (≤15 min of work between
-  commits).
-- When done, append a claim to `coordination/review-queue.md` with the
-  deployed URL and a short script the Reviewer can follow to verify
-  end-to-end. Do not mark this task "shipped" yourself — that requires
-  a Reviewer PASS.
+- The game state goes inside `SessionRoom` (the existing DO). Don't
+  introduce a new DO class. Add a `GameState` type and a generator
+  function; the DO emits role-specific `game-state` messages on the
+  same socket the spine already uses. Use a typed message envelope
+  (`{ type: "game-state", view: "pilot" | "lighthouse", … }`) so the
+  client can switch on it.
+- Keep the client minimal — extend the existing single-page script,
+  no framework. If the inline `<script>` is becoming hard to read,
+  splitting into a small ES module served from the same Worker is
+  fine; document the choice in the commit.
+- Hard rules apply: curly braces on every conditional, no `any`,
+  prefer `type` over `interface`, named exports, British English in
+  any human-facing copy. Commit small and often (≤15 min of active
+  work between commits). Do not sign commits.
+- When done, append a claim to `coordination/review-queue.md` with
+  the deployed URL, the commit sha, the role-view assertions the
+  Reviewer should run, and the new Playwright spec name. Do not mark
+  this task "shipped" yourself — that requires a Reviewer PASS.

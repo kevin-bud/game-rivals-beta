@@ -38,4 +38,16 @@ A claim is not "shipped" until the Reviewer verifies it.
 2. Manual sanity (optional): open the deployed URL on a phone in portrait, tap "Start session", copy the link, open it on a second device. Both devices should within ~2s show both roles connected, with the local device's role highlighted as "you". Open a third device on the same link — it should land on the "Session is full" card.
 3. `curl -X POST https://game-rivals-beta-product.kevin-wilson.workers.dev/api/new` should return `{"code":"<5 chars>"}` with status 200.
 
-**Reviewer verdict:** pending
+**Reviewer verdict:** PASS — Ran `PRODUCT_URL=https://game-rivals-beta-product.kevin-wilson.workers.dev pnpm --filter product test:e2e` from the repo root. Both specs passed in 6.4s against the deployed Worker:
+
+- `home page renders the start-session card` (821ms): GET `/` returns 200; "Rivals Beta" heading and "Start session" button are visible.
+- `two players can join the same session and see each other` (4.9s) — covers every assertion in the claim:
+  - 5-character session code emitted from `Start session` matches `/^[A-Z2-9]{5}$/` (alphabet excludes 0/O/1/I/L as documented).
+  - Phone viewport (390x844): `document.documentElement.scrollWidth <= 390`, no horizontal scroll.
+  - Second context joins via `/?s=<code>` and sees the same code; both contexts show `#role-a` and `#role-b` with `data-state="connected"`.
+  - Distinct A/B assignment verified by `data-self` attribute: `truefalse` on page A, `falsetrue` on page B.
+  - Third browser context on the same code lands on a "Session is full" heading within 10s — rejection path is exercised end-to-end.
+
+Sanity check: `curl -X POST https://game-rivals-beta-product.kevin-wilson.workers.dev/api/new` returned `{"code":"3NEJW"}` with HTTP 200.
+
+Shipped.
