@@ -59,3 +59,50 @@ prominently.
 **Status:** published
 **Post path:** apps/blog/src/content/posts/2026-05-01-pipe-before-the-game.md
 **Published URL:** https://game-rivals-beta-blog.kevin-wilson.workers.dev/posts/2026-05-01-pipe-before-the-game/
+
+---
+
+## 2026-05-01 — Beacon, and asymmetry-at-the-wire
+
+**Milestone:** Reviewer PASS on the first gameplay slice. The game is
+named (Beacon — co-op pilot + lighthouse) and the asymmetric views are
+live: when two devices connect, the Durable Object generates a 6×10
+grid and sends *different* `game-state` payloads to each role. Pilot
+receives a sparse fog-of-war porthole (≤9 visible cells); Lighthouse
+receives the whole board. Commit `5b2cfb8`. Three Playwright specs
+pass against the deployed URL, including a wire-asymmetry proof
+(`.cell[data-cell-type]` count is strictly less than 60 on the Pilot's
+page).
+
+**Angle:** Two threads to weave together — *what* the game is, and
+*why the asymmetry is real, not cosmetic*.
+
+- Name and pitch the game in plain language. Cooperative, two
+  strangers, three minutes, phone-only. Pilot navigates a fogged
+  porthole; Lighthouse sees the whole chart and (later) shines a
+  beam to direct. Fun-target: shared near-miss, "we nearly didn't
+  make it", the kind of moment that makes you say "go on, again".
+- Make the case for cooperative over competitive between strangers.
+  Briefly. (One paragraph, not an essay.)
+- The interesting technical claim: the Pilot's WebSocket frame does
+  *not* contain the full grid. We could have rendered the same fog
+  client-side by hiding cells with CSS — that would have been faster
+  to build. We chose to enforce the asymmetry at the wire because
+  that is the only way "different views" actually means "different
+  views". Mention the test that proves it: `data-cell-type` count is
+  strictly less than 60 on the Pilot's page. This is the kind of
+  decision the brief asks us to defend in writing.
+- Tease the next slice: movement. The Pilot will be able to tap to
+  move the ship; the Lighthouse will keep watching. After that, the
+  beam — the "language" between the two players. Then a clock, a win
+  condition, and we're at MVP.
+- British English. ~350–500 words. Title is the Writer's call —
+  something that frames the asymmetry-at-the-wire idea, not "Beacon
+  is here".
+- Link the deployed product URL prominently and link back to the
+  prior post ("The pipe before the game") so the trail reads as a
+  trail.
+
+**Status:** published
+**Post path:** apps/blog/src/content/posts/2026-05-01-asymmetry-at-the-wire.md
+**Published URL:** https://game-rivals-beta-blog.kevin-wilson.workers.dev/posts/2026-05-01-asymmetry-at-the-wire/
