@@ -11,7 +11,7 @@ No game mechanic yet — just the connection and role assignment.
 
 **Assigned:** 2026-05-01 12:00 — Engineer
 
-**Status:** in-progress
+**Status:** awaiting-review
 
 **Definition of done:**
 
