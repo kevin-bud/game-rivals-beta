@@ -5,7 +5,7 @@ test("home page renders the start-session card", async ({ request, page }) => {
   expect(response.status()).toBe(200);
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Rivals Beta" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Beacon" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start session" })).toBeVisible();
 });
 
@@ -97,5 +97,124 @@ test("two players can join the same session and see each other", async ({
   } finally {
     await contextA.close();
     await contextB.close();
+  }
+});
+
+test("Beacon: Pilot sees fog porthole; Lighthouse sees full chart", async ({
+  browser,
+}) => {
+  const phoneViewport = { width: 390, height: 844 };
+
+  const contextPilot = await browser.newContext({ viewport: phoneViewport });
+  const contextLighthouse = await browser.newContext({
+    viewport: phoneViewport,
+  });
+  const pagePilot = await contextPilot.newPage();
+  const pageLighthouse = await contextLighthouse.newPage();
+
+  try {
+    // Pilot starts the session (gets role A by spine convention).
+    await pagePilot.goto("/");
+    await pagePilot.getByRole("button", { name: "Start session" }).click();
+
+    const codeLocator = pagePilot.locator("#code");
+    await expect(codeLocator).toHaveText(/^[A-Z2-9]{5}$/, { timeout: 10_000 });
+    const code = (await codeLocator.textContent())?.trim() ?? "";
+    expect(code).toMatch(/^[A-Z2-9]{5}$/);
+
+    // Lighthouse joins (role B).
+    await pageLighthouse.goto(`/?s=${code}`);
+
+    // Both pages should reach the game view.
+    const pilotGrid = pagePilot.locator('[data-view="pilot"]');
+    const lighthouseGrid = pageLighthouse.locator('[data-view="lighthouse"]');
+    await expect(pilotGrid).toBeVisible({ timeout: 10_000 });
+    await expect(lighthouseGrid).toBeVisible({ timeout: 10_000 });
+
+    // Visible role labels.
+    await expect(
+      pagePilot.locator('#game-role-name[data-game-role="pilot"]'),
+    ).toHaveText("Pilot");
+    await expect(
+      pageLighthouse.locator(
+        '#game-role-name[data-game-role="lighthouse"]',
+      ),
+    ).toHaveText("Lighthouse");
+
+    // The Pilot's grid must be 6x10 worth of slots, and must contain at
+    // least one fog cell, exactly one ship cell, and zero full-grid markers.
+    // The "no full-grid markup" check is real because data-cell-type only
+    // appears on cells the server actually revealed to the Pilot.
+    const pilotCellCount = await pilotGrid.locator(".cell").count();
+    expect(pilotCellCount).toBe(60);
+
+    await expect(
+      pilotGrid.locator('.cell[data-fog="true"]'),
+    ).not.toHaveCount(0);
+    await expect(
+      pilotGrid.locator('.cell[data-cell-type="ship"]'),
+    ).toHaveCount(1);
+
+    // The Pilot must not receive the rest of the board: rocks outside the
+    // porthole must not be present, and the port must not be present unless
+    // it happened to land inside the radius (allow at most one).
+    const pilotRockCount = await pilotGrid
+      .locator('.cell[data-cell-type="rock"]')
+      .count();
+    const pilotPortCount = await pilotGrid
+      .locator('.cell[data-cell-type="port"]')
+      .count();
+    // The fog porthole has 9 cells max; rocks within view are intentionally
+    // suppressed by the generator so this should be 0 in practice. Cap at
+    // 8 (any of the 8 neighbours of the ship) as a safety upper bound.
+    expect(pilotRockCount).toBeLessThanOrEqual(8);
+    expect(pilotPortCount).toBeLessThanOrEqual(1);
+
+    // The Pilot must NOT be able to count all rocks the Lighthouse can see
+    // — that would mean the server leaked the full state. Total revealed
+    // typed cells must be strictly less than the full 60-cell board.
+    const pilotTypedCount = await pilotGrid
+      .locator(".cell[data-cell-type]")
+      .count();
+    expect(pilotTypedCount).toBeLessThan(60);
+
+    // The Lighthouse's grid: exactly 60 typed cells, exactly one ship, one
+    // port, and between 6 and 10 rocks (per the brief).
+    const lighthouseCellCount = await lighthouseGrid.locator(".cell").count();
+    expect(lighthouseCellCount).toBe(60);
+    const lighthouseTypedCount = await lighthouseGrid
+      .locator(".cell[data-cell-type]")
+      .count();
+    expect(lighthouseTypedCount).toBe(60);
+    await expect(
+      lighthouseGrid.locator('.cell[data-cell-type="ship"]'),
+    ).toHaveCount(1);
+    await expect(
+      lighthouseGrid.locator('.cell[data-cell-type="port"]'),
+    ).toHaveCount(1);
+    const lighthouseRockCount = await lighthouseGrid
+      .locator('.cell[data-cell-type="rock"]')
+      .count();
+    expect(lighthouseRockCount).toBeGreaterThanOrEqual(6);
+    expect(lighthouseRockCount).toBeLessThanOrEqual(10);
+
+    // The Lighthouse must never see fog — the Lighthouse view is the full
+    // board.
+    await expect(
+      lighthouseGrid.locator('.cell[data-fog="true"]'),
+    ).toHaveCount(0);
+
+    // No horizontal scroll on either phone view.
+    const pilotScrollWidth = await pagePilot.evaluate(
+      () => document.documentElement.scrollWidth,
+    );
+    const lighthouseScrollWidth = await pageLighthouse.evaluate(
+      () => document.documentElement.scrollWidth,
+    );
+    expect(pilotScrollWidth).toBeLessThanOrEqual(phoneViewport.width);
+    expect(lighthouseScrollWidth).toBeLessThanOrEqual(phoneViewport.width);
+  } finally {
+    await contextPilot.close();
+    await contextLighthouse.close();
   }
 });

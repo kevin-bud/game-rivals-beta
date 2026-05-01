@@ -7,7 +7,7 @@ export const clientHtml = `<!doctype html>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0d1117" />
-    <title>Rivals Beta</title>
+    <title>Beacon</title>
     <style>
       *,
       *::before,
@@ -33,46 +33,46 @@ export const clientHtml = `<!doctype html>
       main {
         width: 100%;
         max-width: 420px;
-        padding: 1.5rem 1.25rem 2rem;
+        padding: 1.25rem 1rem 1.5rem;
         display: flex;
         flex-direction: column;
-        gap: 1.25rem;
+        gap: 1rem;
         min-height: 100vh;
       }
       header h1 {
-        font-size: 1.5rem;
-        margin: 0 0 0.25rem;
+        font-size: 1.4rem;
+        margin: 0 0 0.2rem;
         letter-spacing: 0.02em;
       }
       header p {
         margin: 0;
         color: #9da7b3;
-        font-size: 0.95rem;
+        font-size: 0.9rem;
       }
       .card {
         background: #161b22;
         border: 1px solid #30363d;
         border-radius: 14px;
-        padding: 1.1rem 1rem;
+        padding: 1rem;
         display: flex;
         flex-direction: column;
-        gap: 0.85rem;
+        gap: 0.75rem;
       }
       .card h2 {
         margin: 0;
-        font-size: 1.05rem;
+        font-size: 1rem;
         font-weight: 600;
         color: #c9d1d9;
       }
       .code {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 2rem;
+        font-size: 1.8rem;
         letter-spacing: 0.35em;
         text-align: center;
         background: #0d1117;
         border: 1px dashed #30363d;
         border-radius: 10px;
-        padding: 0.85rem 0.5rem;
+        padding: 0.7rem 0.5rem;
         word-break: break-all;
       }
       .share {
@@ -170,13 +170,98 @@ export const clientHtml = `<!doctype html>
       .hidden {
         display: none !important;
       }
+
+      /* Game view shared chrome. */
+      .role-banner {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+      .role-banner .role-label {
+        font-size: 0.7rem;
+        color: #8b949e;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .role-banner .role-name {
+        font-size: 1.2rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+      .role-banner .role-name[data-game-role="pilot"] {
+        color: #f0b72f;
+      }
+      .role-banner .role-name[data-game-role="lighthouse"] {
+        color: #58a6ff;
+      }
+      .role-blurb {
+        margin: 0;
+        font-size: 0.85rem;
+        color: #9da7b3;
+      }
+
+      /* Grid layout. Cells stay square via aspect-ratio. The grid scales
+         to the card width so a 6-wide grid fits comfortably on a 390px
+         portrait phone with no horizontal scroll. */
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(var(--grid-cols, 6), 1fr);
+        gap: 4px;
+        background: #0d1117;
+        padding: 6px;
+        border: 1px solid #30363d;
+        border-radius: 10px;
+      }
+      .cell {
+        aspect-ratio: 1 / 1;
+        border-radius: 6px;
+        background: #161b22;
+        border: 1px solid #21262d;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: clamp(0.9rem, 4.5vw, 1.4rem);
+        line-height: 1;
+        position: relative;
+      }
+      .cell[data-cell-type="empty"] {
+        background: #0f3a5a;
+        border-color: #1c4e72;
+      }
+      .cell[data-cell-type="rock"] {
+        background: #3a2a1a;
+        border-color: #5a3f24;
+        color: #f0c694;
+      }
+      .cell[data-cell-type="port"] {
+        background: #1f4d2b;
+        border-color: #2ea043;
+        color: #f6f8fa;
+      }
+      .cell[data-cell-type="ship"] {
+        background: #f0b72f;
+        border-color: #ffd060;
+        color: #1a1300;
+      }
+      .cell[data-fog="true"] {
+        background: #04070b;
+        border-color: #0d1117;
+        color: transparent;
+      }
+
+      /* Pilot's view leans into the porthole metaphor. */
+      .pilot-grid {
+        max-width: 320px;
+        margin: 0 auto;
+      }
     </style>
   </head>
   <body>
     <main>
       <header>
-        <h1>Rivals Beta</h1>
-        <p id="subtitle">Real-time two-player session.</p>
+        <h1>Beacon</h1>
+        <p id="subtitle">A cooperative two-player session.</p>
       </header>
 
       <section id="start" class="card hidden">
@@ -207,6 +292,21 @@ export const clientHtml = `<!doctype html>
         <p id="status" class="status" data-tone="">Connecting...</p>
       </section>
 
+      <section id="game" class="card hidden" aria-live="polite">
+        <div class="role-banner">
+          <div>
+            <div class="role-label">You are</div>
+            <div id="game-role-name" class="role-name" data-game-role="">--</div>
+          </div>
+          <div style="text-align: right">
+            <div class="role-label">Session</div>
+            <div id="game-code" style="font-family: ui-monospace, monospace; letter-spacing: 0.2em">-----</div>
+          </div>
+        </div>
+        <p id="game-blurb" class="role-blurb">Waiting for the grid...</p>
+        <div id="game-grid-host"></div>
+      </section>
+
       <section id="full" class="card hidden">
         <h2>Session is full</h2>
         <p class="status" data-tone="error">Two players are already connected to this code. Ask one of them to share a fresh session.</p>
@@ -220,6 +320,7 @@ export const clientHtml = `<!doctype html>
       const subtitle = document.getElementById("subtitle");
       const startSection = document.getElementById("start");
       const lobbySection = document.getElementById("lobby");
+      const gameSection = document.getElementById("game");
       const fullSection = document.getElementById("full");
       const startButton = document.getElementById("start-button");
       const newButton = document.getElementById("new-button");
@@ -231,9 +332,15 @@ export const clientHtml = `<!doctype html>
       const roleB = document.getElementById("role-b");
       const roleAStatus = document.getElementById("role-a-status");
       const roleBStatus = document.getElementById("role-b-status");
+      const gameRoleName = document.getElementById("game-role-name");
+      const gameCode = document.getElementById("game-code");
+      const gameBlurb = document.getElementById("game-blurb");
+      const gameGridHost = document.getElementById("game-grid-host");
+
+      const ALL_SECTIONS = [startSection, lobbySection, gameSection, fullSection];
 
       const showOnly = (section) => {
-        for (const candidate of [startSection, lobbySection, fullSection]) {
+        for (const candidate of ALL_SECTIONS) {
           if (candidate === section) {
             candidate.classList.remove("hidden");
           } else {
@@ -264,6 +371,92 @@ export const clientHtml = `<!doctype html>
         }
       };
 
+      const glyphFor = (type) => {
+        if (type === "ship") {
+          return "⛵"; // sailboat
+        }
+        if (type === "port") {
+          return "⚓"; // anchor
+        }
+        if (type === "rock") {
+          return "⛰"; // mountain
+        }
+        return "";
+      };
+
+      const renderPilotGrid = (state, sessionCode) => {
+        gameRoleName.textContent = "Pilot";
+        gameRoleName.dataset.gameRole = "pilot";
+        gameCode.textContent = sessionCode;
+        gameBlurb.textContent =
+          "You can only see the waters around your craft. Fog hides the rest.";
+
+        // Build only the visible cells plus fog for everything else. We keep
+        // the fog cells in the markup (so the grid still has a shape) but
+        // mark them data-fog="true" and do not place any cell-type metadata
+        // on them. Only the cells inside the porthole carry data-cell-type.
+        const visibleByKey = new Map();
+        for (const cell of state.visible) {
+          visibleByKey.set(cell.x + "," + cell.y, cell);
+        }
+
+        const container = document.createElement("div");
+        container.className = "grid pilot-grid";
+        container.dataset.view = "pilot";
+        container.style.setProperty("--grid-cols", String(state.width));
+
+        for (let y = 0; y < state.height; y += 1) {
+          for (let x = 0; x < state.width; x += 1) {
+            const cellEl = document.createElement("div");
+            cellEl.className = "cell";
+            cellEl.dataset.cell = x + "," + y;
+            const visible = visibleByKey.get(x + "," + y);
+            if (visible) {
+              cellEl.dataset.cellType = visible.type;
+              cellEl.textContent = glyphFor(visible.type);
+              cellEl.setAttribute(
+                "aria-label",
+                visible.type + " at column " + (x + 1) + " row " + (y + 1),
+              );
+            } else {
+              cellEl.dataset.fog = "true";
+              cellEl.setAttribute("aria-label", "fog");
+            }
+            container.appendChild(cellEl);
+          }
+        }
+
+        gameGridHost.replaceChildren(container);
+      };
+
+      const renderLighthouseGrid = (state, sessionCode) => {
+        gameRoleName.textContent = "Lighthouse";
+        gameRoleName.dataset.gameRole = "lighthouse";
+        gameCode.textContent = sessionCode;
+        gameBlurb.textContent =
+          "You see the whole chart. The Pilot is in the fog and needs your guidance.";
+
+        const container = document.createElement("div");
+        container.className = "grid lighthouse-grid";
+        container.dataset.view = "lighthouse";
+        container.style.setProperty("--grid-cols", String(state.width));
+
+        for (const cell of state.cells) {
+          const cellEl = document.createElement("div");
+          cellEl.className = "cell";
+          cellEl.dataset.cell = cell.x + "," + cell.y;
+          cellEl.dataset.cellType = cell.type;
+          cellEl.textContent = glyphFor(cell.type);
+          cellEl.setAttribute(
+            "aria-label",
+            cell.type + " at column " + (cell.x + 1) + " row " + (cell.y + 1),
+          );
+          container.appendChild(cellEl);
+        }
+
+        gameGridHost.replaceChildren(container);
+      };
+
       const connect = (code) => {
         showOnly(lobbySection);
         codeEl.textContent = code;
@@ -291,11 +484,14 @@ export const clientHtml = `<!doctype html>
           } catch {
             return;
           }
-          if (payload && payload.type === "full") {
+          if (!payload || typeof payload.type !== "string") {
+            return;
+          }
+          if (payload.type === "full") {
             showOnly(fullSection);
             return;
           }
-          if (payload && payload.type === "welcome") {
+          if (payload.type === "welcome") {
             gotWelcome = true;
             myRole = payload.you;
             updateRoles(payload.peers, myRole);
@@ -306,14 +502,29 @@ export const clientHtml = `<!doctype html>
             }
             return;
           }
-          if (payload && payload.type === "peer-joined") {
+          if (payload.type === "peer-joined") {
             updateRoles(payload.peers, myRole);
             setStatus("Both players connected.", "ok");
             return;
           }
-          if (payload && payload.type === "peer-left") {
+          if (payload.type === "peer-left") {
             updateRoles(payload.peers, myRole);
             setStatus("The other player disconnected. Start a new session to play again.", "error");
+            // Drop back to the lobby — the grid is no longer authoritative.
+            showOnly(lobbySection);
+            return;
+          }
+          if (payload.type === "game-state") {
+            if (payload.view === "pilot") {
+              renderPilotGrid(payload.state, code);
+              showOnly(gameSection);
+              return;
+            }
+            if (payload.view === "lighthouse") {
+              renderLighthouseGrid(payload.state, code);
+              showOnly(gameSection);
+              return;
+            }
             return;
           }
         });
@@ -368,7 +579,7 @@ export const clientHtml = `<!doctype html>
         const value = shareLink.value;
         try {
           if (navigator.share) {
-            await navigator.share({ title: "Rivals Beta", url: value });
+            await navigator.share({ title: "Beacon", url: value });
             return;
           }
         } catch {

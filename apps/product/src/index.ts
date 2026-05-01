@@ -40,7 +40,11 @@ const handleWebSocket = (request: Request, env: Env): Response => {
   }
   const id = env.SESSION.idFromName(code);
   const stub = env.SESSION.get(id);
-  const forwarded = new Request("https://session/ws", request);
+  // Forward the session code so the DO can deterministically seed its grid.
+  const forwarded = new Request(
+    `https://session/ws?s=${encodeURIComponent(code)}`,
+    request,
+  );
   return stub.fetch(forwarded);
 };
 
