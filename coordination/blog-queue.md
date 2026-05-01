@@ -56,5 +56,6 @@ shipped yet (no game). British English. Title and length are the
 Writer's call but ~300–500 words feels right. Link to the deployed URL
 prominently.
 
-**Status:** drafting
-**Post path:** (filled in when published)
+**Status:** published
+**Post path:** apps/blog/src/content/posts/2026-05-01-pipe-before-the-game.md
+**Published URL:** https://game-rivals-beta-blog.kevin-wilson.workers.dev/posts/2026-05-01-pipe-before-the-game/
